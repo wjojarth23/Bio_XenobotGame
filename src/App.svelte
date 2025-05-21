@@ -38,6 +38,15 @@
         <p><strong>Function in Xenobots:</strong> These cells contract and relax rhythmically, providing the motive force for the Xenobot. Their coordinated contractions allow the Xenobot to move or manipulate its environment.</p>
         <p><strong>AP Bio Concepts:</strong> Cell differentiation, specialized cell function (muscle contraction), cytoskeleton (actin & myosin filaments), cellular respiration (ATP for contraction), emergent properties when cells work together.</p>
       `
+    },
+    delete: {
+      name: 'Delete Cell',
+      shortName: 'Delete',
+      color: '#FF4136',
+      description: `
+        <p><strong>Function:</strong> Select this tool to remove cells from your Xenobot design.</p>
+        <p><strong>How to use:</strong> Select "Delete" then click on any existing cell to remove it from the structure.</p>
+      `
     }
   };
 
@@ -297,7 +306,8 @@
 
     const cellMaterials = {
       epithelial: new THREE.MeshStandardMaterial({ color: cellInfo.epithelial.color, roughness: 0.6, metalness: 0.1 }),
-      cardiomyocyte: new THREE.MeshStandardMaterial({ color: cellInfo.cardiomyocyte.color, roughness: 0.5, metalness: 0.1 })
+      cardiomyocyte: new THREE.MeshStandardMaterial({ color: cellInfo.cardiomyocyte.color, roughness: 0.5, metalness: 0.1 }),
+      delete: new THREE.MeshStandardMaterial({ color: cellInfo.delete.color, roughness: 0.5, metalness: 0.1 })
     };
 
     const raycaster = new THREE.Raycaster();
@@ -315,53 +325,73 @@
     }
 
     // In the onWindowClick event handler within onMount:
-const onWindowClick = (event) => {
-  if (isSimulating || showInfoModal) {
-    if (showInfoModal && event.target.classList.contains('modal-overlay')) {
-      closeInfoModal();
-    }
-    return;
-  }
+    const onWindowClick = (event) => {
+      if (isSimulating || showInfoModal) {
+        if (showInfoModal && event.target.classList.contains('modal-overlay')) {
+          closeInfoModal();
+        }
+        return;
+      }
 
-  if (event.target.closest('.controls-panel')) return;
+      if (event.target.closest('.controls-panel')) return;
 
-  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-  raycaster.setFromCamera(mouse, camera);
-  const intersectableObjects = scene.children.filter(c => c === petriDishBase || (c.userData.isCell && c.visible));
-  const intersects = raycaster.intersectObjects(intersectableObjects, false);
+      raycaster.setFromCamera(mouse, camera);
+      
+      // For delete mode, we only want to check intersections with cells
+      let intersectableObjects;
+      if (currentCellType === 'delete') {
+        intersectableObjects = scene.children.filter(c => c.userData.isCell && c.visible);
+      } else {
+        intersectableObjects = scene.children.filter(c => c === petriDishBase || (c.userData.isCell && c.visible));
+      }
+      
+      const intersects = raycaster.intersectObjects(intersectableObjects, false);
 
-  if (intersects.length > 0) {
-    const intersect = intersects[0];
-    const newCellPosition = new THREE.Vector3();
-    const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersect.object.matrixWorld);
-    const worldNormal = intersect.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+      if (intersects.length > 0) {
+        const intersect = intersects[0];
+        
+        // Handle delete action
+        if (currentCellType === 'delete') {
+          if (intersect.object.userData.isCell) {
+            // Remove the cell from the scene
+            scene.remove(intersect.object);
+            return;
+          }
+        } else {
+          // Original cell placement logic
+          const newCellPosition = new THREE.Vector3();
+          const normalMatrix = new THREE.Matrix3().getNormalMatrix(intersect.object.matrixWorld);
+          const worldNormal = intersect.face.normal.clone().applyMatrix3(normalMatrix).normalize();
+          
+          if (intersect.object === petriDishBase) {
+            // Placement on petri dish
+            newCellPosition.copy(intersect.point);
+            newCellPosition.y = cellSize/2; // Center Y position
+            newCellPosition.x = Math.round(newCellPosition.x / cellSize) * cellSize;
+            newCellPosition.z = Math.round(newCellPosition.z / cellSize) * cellSize;
+          } else {
+            // Placement on existing cell
+            newCellPosition.copy(intersect.object.position);
+            newCellPosition.add(worldNormal.multiplyScalar(cellSize));
+          }
+
+          // Remove Y-axis grid adjustments and only maintain valid Y positions
+          newCellPosition.y = Math.max(cellSize/2, Math.round(newCellPosition.y / (cellSize/2)) * (cellSize/2));
+
+          if (!cellExistsAt(newCellPosition)) {
+            const cellGeometry = new THREE.BoxGeometry(cellSize, cellSize, cellSize);
+            const cell = new THREE.Mesh(cellGeometry, cellMaterials[currentCellType]);
+            cell.position.copy(newCellPosition);
+            cell.userData = { isCell: true, cellType: currentCellType };
+            scene.add(cell);
+          }
+        }
+      }
+    };
     
-    if (intersect.object === petriDishBase) {
-      // Placement on petri dish
-      newCellPosition.copy(intersect.point);
-      newCellPosition.y = cellSize/2; // Center Y position
-      newCellPosition.x = Math.round(newCellPosition.x / cellSize) * cellSize;
-      newCellPosition.z = Math.round(newCellPosition.z / cellSize) * cellSize;
-    } else {
-      // Placement on existing cell
-      newCellPosition.copy(intersect.object.position);
-      newCellPosition.add(worldNormal.multiplyScalar(cellSize));
-    }
-
-    // Remove Y-axis grid adjustments and only maintain valid Y positions
-    newCellPosition.y = Math.max(cellSize/2, Math.round(newCellPosition.y / (cellSize/2)) * (cellSize/2));
-
-    if (!cellExistsAt(newCellPosition)) {
-      const cellGeometry = new THREE.BoxGeometry(cellSize, cellSize, cellSize);
-      const cell = new THREE.Mesh(cellGeometry, cellMaterials[currentCellType]);
-      cell.position.copy(newCellPosition);
-      cell.userData = { isCell: true, cellType: currentCellType };
-      scene.add(cell);
-    }
-  }
-};
     window.addEventListener('click', onWindowClick);
 
     function render() {
@@ -395,6 +425,7 @@ const onWindowClick = (event) => {
       <p class="instructions">
         Select a cell type, then click on the petri dish or an existing cell to place new cells.
         Use mouse to rotate, scroll to zoom, right-click & drag to pan.
+        Select "Delete" to remove cells.
       </p>
     </div>
 
@@ -419,6 +450,16 @@ const onWindowClick = (event) => {
           {cellInfo.cardiomyocyte.shortName}
         </button>
         <button class="info-button" on:click={() => openInfoModal('cardiomyocyte')} title="Learn about Cardiomyocytes">?</button>
+      </div>
+      <div class="cell-option">
+        <button
+          class="cell-button"
+          class:selected={currentCellType === 'delete'}
+          style="background-color: {cellInfo.delete.color}; color: white;"
+          on:click={() => currentCellType = 'delete'}>
+          {cellInfo.delete.shortName}
+        </button>
+        <button class="info-button" on:click={() => openInfoModal('delete')} title="Learn about Delete Tool">?</button>
       </div>
       <p class="current-selection">Selected: <strong>{cellInfo[currentCellType].name}</strong></p>
     </div>
@@ -455,7 +496,6 @@ const onWindowClick = (event) => {
     </div>
   {/if}
 </div>
-
 <style>
   :global(body) {
     margin: 0;
